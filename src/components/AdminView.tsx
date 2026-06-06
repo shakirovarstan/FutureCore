@@ -17,7 +17,10 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | "student" | "volunteer">("all");
   const [errorMess, setErrorMess] = useState<string | null>(null);
-  const [tgConfig, setTgConfig] = useState<{ isConfigured: boolean; chatId: string | null } | null>(null);
+  const [tgConfig, setTgConfig] = useState<{ isConfigured: boolean; chatId: string | null }>({
+    isConfigured: false,
+    chatId: null
+  });
 
   // Customized, iframe-safe interactive states and notifications
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -148,9 +151,20 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
       {/* Header and Sync Panel */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 text-white p-5 rounded-3xl border border-slate-800 shadow-md">
         <div className="space-y-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="bg-emerald-500 text-white text-[9px] font-black tracking-widest px-2.5 py-1 rounded-md uppercase">Live</span>
             <span className="bg-sky-500 text-white text-[9px] font-black tracking-widest px-2.5 py-1 rounded-md uppercase">Куратор</span>
+            {tgConfig.isConfigured ? (
+              <span className="bg-emerald-600 border border-emerald-500 text-emerald-100 text-[9px] font-black tracking-widest px-2.5 py-1 rounded-md uppercase flex items-center gap-1 animate-pulse">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                Telegram API: РАБОТАЕТ
+              </span>
+            ) : (
+              <span className="bg-rose-500/20 border border-rose-500/30 text-rose-300 text-[9px] font-black tracking-widest px-2.5 py-1 rounded-md uppercase flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                Telegram API: БЕЗ БОТА
+              </span>
+            )}
             <h1 className="text-xl font-display font-black tracking-tight">Панель Куратора</h1>
           </div>
           <p className="text-xs text-slate-300 font-sans leading-relaxed">
