@@ -18,27 +18,33 @@ export default function App() {
     return localStorage.getItem("admin_unlocked") === "true";
   });
   const [logoClicks, setLogoClicks] = useState(0);
+  const [lastLogoClickTime, setLastLogoClickTime] = useState(0);
   const [showPasscodeDialog, setShowPasscodeDialog] = useState(false);
   const [enteredPasscode, setEnteredPasscode] = useState("");
   const [passcodeError, setPasscodeError] = useState("");
 
   const handleLogoClick = () => {
+    const now = Date.now();
     setLogoClicks((prev) => {
-      const next = prev + 1;
-      if (next >= 5) {
+      // Rapid clicking: reset click stream if there's a delay of more than 3.5 seconds
+      const isQuickTap = now - lastLogoClickTime < 3500;
+      const count = isQuickTap ? prev + 1 : 1;
+      setLastLogoClickTime(now);
+      
+      if (count >= 5) {
         setShowPasscodeDialog(true);
         setPasscodeError("");
         setEnteredPasscode("");
         return 0;
       }
-      return next;
+      return count;
     });
   };
 
   const handleVerifyPasscode = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const clean = enteredPasscode.trim().toLowerCase();
-    if (clean === "admin" || clean === "1234" || clean === "futurecore") {
+    const clean = enteredPasscode.trim();
+    if (clean === "futurecore1234") {
       setIsAdminUnlocked(true);
       localStorage.setItem("admin_unlocked", "true");
       setShowPasscodeDialog(false);
@@ -46,7 +52,7 @@ export default function App() {
       setPasscodeError("");
       setActiveTab("admin");
     } else {
-      setPasscodeError("Неверный пароль. Попробуйте 'admin' или '1234'.");
+      setPasscodeError("Доступ запрещен. Некорректный ключ авторизации куратора.");
     }
   };
 
@@ -183,30 +189,28 @@ export default function App() {
         </button>
 
         {/* Navigation Tab: Admin / Curator */}
-        <button
-          onClick={() => {
-            if (isAdminUnlocked) {
+        {isAdminUnlocked && (
+          <button
+            onClick={() => {
               setActiveTab("admin");
               handleCancelApplicationFlow();
-            } else {
-              setShowPasscodeDialog(true);
-            }
-          }}
-          className={`flex-1 flex flex-col items-center justify-center h-full py-1.5 transition-all duration-200 cursor-pointer focus:outline-hidden relative group`}
-          style={{ minHeight: '48px' }}
-        >
-          <div className={`p-1 px-3 rounded-full flex flex-col items-center justify-center transition-all ${
-            activeTab === "admin" 
-              ? "bg-slate-900 text-white font-extrabold" 
-              : "text-slate-500 hover:text-slate-900"
-          }`}>
-            <Shield className={`w-[18px] h-[18px] ${activeTab === "admin" ? "stroke-[2.5]" : "stroke-[1.8]"}`} />
-            <span className="text-[10px] font-sans mt-0.5 tracking-tight font-medium">Куратор</span>
-          </div>
-          {activeTab === "admin" && (
-            <span className="absolute bottom-1 w-1 h-1 bg-slate-900 rounded-full" />
-          )}
-        </button>
+            }}
+            className={`flex-1 flex flex-col items-center justify-center h-full py-1.5 transition-all duration-200 cursor-pointer focus:outline-hidden relative group`}
+            style={{ minHeight: '48px' }}
+          >
+            <div className={`p-1 px-3 rounded-full flex flex-col items-center justify-center transition-all ${
+              activeTab === "admin" 
+                ? "bg-slate-900 text-white font-extrabold" 
+                : "text-slate-500 hover:text-slate-900"
+            }`}>
+              <Shield className={`w-[18px] h-[18px] ${activeTab === "admin" ? "stroke-[2.5]" : "stroke-[1.8]"}`} />
+              <span className="text-[10px] font-sans mt-0.5 tracking-tight font-medium">Куратор</span>
+            </div>
+            {activeTab === "admin" && (
+              <span className="absolute bottom-1 w-1 h-1 bg-slate-900 rounded-full" />
+            )}
+          </button>
+        )}
       </nav>
 
       {/* Interactive Beautiful Passcode Modal Dialog */}
@@ -285,7 +289,7 @@ export default function App() {
                 </div>
 
                 <div className="text-center pt-2 border-t border-slate-100">
-                  <span className="text-[10px] text-slate-400 block">Разработчику: правильный пароль: <strong className="text-slate-600">1234</strong> или <strong className="text-slate-600">admin</strong></span>
+                  <span className="text-[10px] text-slate-400 block">Разработчику: секретный пароль: <strong className="text-slate-600 select-all">futurecore1234</strong></span>
                 </div>
               </form>
             </motion.div>
