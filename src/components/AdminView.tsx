@@ -31,7 +31,9 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
     if (!silent) setIsLoading(true);
     setErrorMess(null);
     try {
-      const res = await fetch("/api/applications");
+      const res = await fetch(`/api/applications?_t=${Date.now()}`, {
+        headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" }
+      });
       if (!res.ok) {
         throw new Error("Не удалось загрузить заявки с сервера.");
       }

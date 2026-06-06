@@ -77,7 +77,9 @@ export function ApplicationsView({
 
     const syncWithServer = async () => {
       try {
-        const res = await fetch("/api/applications");
+        const res = await fetch(`/api/applications?_t=${Date.now()}`, {
+          headers: { "Cache-Control": "no-cache", "Pragma": "no-cache" }
+        });
         if (res.ok) {
           const serverApps: Application[] = await res.json();
           // Fetch freshest local ones (for newly saved drafts/actions)

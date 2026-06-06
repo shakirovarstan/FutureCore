@@ -1,5 +1,5 @@
 {
-  "name": "FutureCore",
+  "name": "FutureCore.kg",
   "description": "Портал инициативы FutureCore: бесплатное обучение детей из малоимущих семей и детей с инвалидностью английскому, математике и ИИ, а также набор волонтёров-преподавателей",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
