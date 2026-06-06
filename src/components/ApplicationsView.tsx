@@ -62,14 +62,8 @@ export function ApplicationsView({
         try {
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed)) {
-            // Clean up old drafts or fake mock entries to ensure only real elements are loaded
             localApps = parsed.filter((app: any) => {
               if (!app || typeof app !== "object") return false;
-              // Strip placeholders with dummy names
-              const name = (app.fullName || "").toLowerCase();
-              if (name.includes("станислав") || name.includes("test") || name.includes("тест") || name.includes("смирнов")) {
-                return false;
-              }
               if (app.id === "app-draft-1") return false;
               return true;
             });
@@ -750,8 +744,15 @@ export function ApplicationsView({
               type="button"
               onClick={() => {
                 onCancelForm();
-                // Refresh local statistics gracefully 
-                window.location.reload();
+                // Clear state fields so the next form is clean
+                setFullName("");
+                setChildInfo("");
+                setVolunteerAge("");
+                setEmail("");
+                setPhone("");
+                setMotivation("");
+                setAvailability([]);
+                setUploadedFiles([]);
               }}
               className="w-full bg-sky-500 hover:bg-sky-600 text-white text-xs font-display font-bold py-3 px-4 rounded-xl transition-all cursor-pointer shadow-xs active:scale-98"
             >
