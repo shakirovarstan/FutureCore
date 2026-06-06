@@ -4,7 +4,7 @@ import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
+import { initializeFirestore, collection, doc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
 
 let aiClient: GoogleGenAI | null = null;
 
@@ -32,8 +32,11 @@ try {
   if (fs.existsSync(configPath)) {
     const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
     const firebaseApp = initializeApp(config);
-    db = getFirestore(firebaseApp, config.firestoreDatabaseId);
-    console.log("Firebase Firestore initialized successfully on backend.");
+    // Use initializeFirestore with experimentalForceLongPolling to prevent WebSocket/gRPC streams dropping in sandbox containers
+    db = initializeFirestore(firebaseApp, {
+      experimentalForceLongPolling: true,
+    }, config.firestoreDatabaseId);
+    console.log("Firebase Firestore initialized successfully with HTTP long-polling on backend.");
   } else {
     console.warn("firebase-applet-config.json not found, falling back to local storage file.");
   }
@@ -41,9 +44,28 @@ try {
   console.error("Error initializing Firebase:", e);
 }
 
-// Helper to fetch submissions from Firestore
-async function getFirestoreSubmissions(): Promise<any[]> {
-  if (!db) return [];
+// Robust custom date parsing helper resolving local formats e.g. "DD.MM.YYYY" or ISO
+function parseDateString(dateStr: string): number {
+  if (!dateStr) return 0;
+  const ts = Date.parse(dateStr);
+  if (!isNaN(ts)) return ts;
+
+  const parts = dateStr.split(".");
+  if (parts.length === 3) {
+    const day = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10) - 1; // 0-based
+    const year = parseInt(parts[2], 10);
+    const d = new Date(year, month, day);
+    if (!isNaN(d.getTime())) {
+      return d.getTime();
+    }
+  }
+  return 0;
+}
+
+// Helper to fetch submissions from Firestore returning null on failure to safeguard fallback
+async function getFirestoreSubmissions(): Promise<any[] | null> {
+  if (!db) return null;
   try {
     const querySnapshot = await getDocs(collection(db, "submissions"));
     const list: any[] = [];
@@ -51,45 +73,33 @@ async function getFirestoreSubmissions(): Promise<any[]> {
       list.push({ ...docSnapshot.data() });
     });
     return list.sort((a, b) => {
-      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      const dateA = a.createdAt ? parseDateString(a.createdAt) : 0;
+      const dateB = b.createdAt ? parseDateString(b.createdAt) : 0;
       return dateB - dateA;
     });
   } catch (err) {
     console.error("Failed to fetch from Firestore:", err);
-    return [];
+    return null;
   }
 }
 
 // Helper to save submission to Firestore
 async function saveFirestoreSubmission(sub: any): Promise<void> {
   if (!db) return;
-  try {
-    await setDoc(doc(db, "submissions", sub.id), sub);
-  } catch (err) {
-    console.error(`Failed to save to Firestore (${sub.id}):`, err);
-  }
+  await setDoc(doc(db, "submissions", sub.id), sub);
 }
 
 // Helper to delete submission from Firestore
 async function deleteFirestoreSubmission(id: string): Promise<void> {
   if (!db) return;
-  try {
-    await deleteDoc(doc(db, "submissions", id));
-  } catch (err) {
-    console.error(`Failed to delete from Firestore (${id}):`, err);
-  }
+  await deleteDoc(doc(db, "submissions", id));
 }
 
 // Helper to update status in Firestore
 async function updateFirestoreSubmissionStatus(id: string, status: string): Promise<void> {
   if (!db) return;
-  try {
-    const docRef = doc(db, "submissions", id);
-    await setDoc(docRef, { status }, { merge: true });
-  } catch (err) {
-    console.error(`Failed to update status in Firestore (${id}):`, err);
-  }
+  const docRef = doc(db, "submissions", id);
+  await setDoc(docRef, { status }, { merge: true });
 }
 
 async function startServer() {
@@ -221,13 +231,19 @@ FutureCore.KG — это некоммерческая инициатива по 
   });
 
   app.get("/api/applications", async (req, res) => {
+    let subs = null;
     if (db) {
-      const subs = await getFirestoreSubmissions();
+      subs = await getFirestoreSubmissions();
+    }
+    
+    if (subs !== null) {
       saveSubmissions(subs);
       return res.json(subs);
+    } else {
+      console.warn("Serving submissions from local fallback JSON cache.");
+      const cached = loadSubmissions();
+      return res.json(cached);
     }
-    const subs = loadSubmissions();
-    res.json(subs);
   });
 
   app.post("/api/applications", async (req, res) => {
@@ -236,34 +252,43 @@ FutureCore.KG — это некоммерческая инициатива по 
       return res.status(400).json({ error: "Invalid submission data" });
     }
     
-    if (db) {
-      await saveFirestoreSubmission(newSub);
-      const subs = await getFirestoreSubmissions();
-      saveSubmissions(subs);
-      return res.status(201).json({ success: true, count: subs.length });
-    }
-
+    // 1. Immediately store in local file cache to guarantee high availability on current container Instance
     const subs = loadSubmissions();
-    // Prevent duplicates
     const filtered = subs.filter((s: any) => s.id !== newSub.id);
     filtered.unshift(newSub);
     saveSubmissions(filtered);
+
+    // 2. Persist to central Firestore database synchronously so other devices can pull immediately
+    if (db) {
+      try {
+        await saveFirestoreSubmission(newSub);
+        console.log(`Successfully persisted submission ${newSub.id} to Firestore.`);
+      } catch (err) {
+        console.error(`Error persisting ${newSub.id} directly to Firestore:`, err);
+      }
+    }
+
     res.status(201).json({ success: true, count: filtered.length });
   });
 
   app.delete("/api/applications/:id", async (req, res) => {
     const { id } = req.params;
     
-    if (db) {
-      await deleteFirestoreSubmission(id);
-      const subs = await getFirestoreSubmissions();
-      saveSubmissions(subs);
-      return res.json({ success: true, count: subs.length });
-    }
-
+    // 1. Immediately remove from local fallback cache
     const subs = loadSubmissions();
     const filtered = subs.filter((s: any) => s.id !== id);
     saveSubmissions(filtered);
+
+    // 2. Synchronize deletion with Firestore database
+    if (db) {
+      try {
+        await deleteFirestoreSubmission(id);
+        console.log(`Successfully synced deleted doc ${id} from Firestore.`);
+      } catch (err) {
+        console.error(`Error deleting doc ${id} from Firestore:`, err);
+      }
+    }
+
     res.json({ success: true, count: filtered.length });
   });
 
@@ -271,13 +296,7 @@ FutureCore.KG — это некоммерческая инициатива по 
     const { id } = req.params;
     const { status } = req.body;
     
-    if (db) {
-      await updateFirestoreSubmissionStatus(id, status);
-      const subs = await getFirestoreSubmissions();
-      saveSubmissions(subs);
-      return res.json({ success: true });
-    }
-
+    // 1. Immediately update local fallback cache
     const subs = loadSubmissions();
     const updated = subs.map((s: any) => {
       if (s.id === id) {
@@ -286,6 +305,17 @@ FutureCore.KG — это некоммерческая инициатива по 
       return s;
     });
     saveSubmissions(updated);
+
+    // 2. Synchronize patched status with Firestore database
+    if (db) {
+      try {
+        await updateFirestoreSubmissionStatus(id, status);
+        console.log(`Successfully patched status of ${id} in Firestore.`);
+      } catch (err) {
+        console.error(`Error patching status of ${id} in Firestore:`, err);
+      }
+    }
+
     res.json({ success: true });
   });
 

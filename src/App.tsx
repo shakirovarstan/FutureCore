@@ -120,7 +120,7 @@ export default function App() {
       {/* Persistent Bottom Tab Navigation (Optimized for Mobile/Touch viewports with modern active state capsule) */}
       <nav 
         id="bottom-nav"
-        className="fixed bottom-0 left-0 w-full z-50 bg-white/95 backdrop-blur-md border-t border-slate-200/60 shadow-[0_-6px_20px_rgba(15,23,42,0.06)] h-16 rounded-t-2xl flex justify-around items-center px-2 pb-safe md:max-w-md md:left-1/2 md:-translate-x-1/2 md:bottom-4 md:rounded-2xl md:border"
+        className="fixed bottom-0 left-0 w-full z-50 bg-white/95 backdrop-blur-md border-t border-slate-200/60 shadow-[0_-6px_20px_rgba(15,23,42,0.06)] h-16 rounded-t-2xl flex justify-around items-center px-2 pb-safe md:max-w-md md:left-1/2 md:-translate-x-1/2 md:bottom-4 md:rounded-2xl md:border will-change-transform"
       >
         {/* Navigation Tab: Home */}
         <button
@@ -288,10 +288,6 @@ export default function App() {
                   >
                     Войти
                   </button>
-                </div>
-
-                <div className="text-center pt-2 border-t border-slate-100">
-                  <span className="text-[10px] text-slate-400 block">Разработчику: секретный пароль: <strong className="text-slate-600 select-all">futurecore1234</strong></span>
                 </div>
               </form>
             </motion.div>
