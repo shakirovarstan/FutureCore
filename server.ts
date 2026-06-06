@@ -3,6 +3,8 @@ import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, doc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
 
 let aiClient: GoogleGenAI | null = null;
 
@@ -21,6 +23,73 @@ function getGeminiClient(): GoogleGenAI | null {
     }
   }
   return aiClient;
+}
+
+// Read firebase-applet-config.json safely for Firestore initialization
+let db: any = null;
+try {
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    const firebaseApp = initializeApp(config);
+    db = getFirestore(firebaseApp, config.firestoreDatabaseId);
+    console.log("Firebase Firestore initialized successfully on backend.");
+  } else {
+    console.warn("firebase-applet-config.json not found, falling back to local storage file.");
+  }
+} catch (e) {
+  console.error("Error initializing Firebase:", e);
+}
+
+// Helper to fetch submissions from Firestore
+async function getFirestoreSubmissions(): Promise<any[]> {
+  if (!db) return [];
+  try {
+    const querySnapshot = await getDocs(collection(db, "submissions"));
+    const list: any[] = [];
+    querySnapshot.forEach((docSnapshot) => {
+      list.push({ ...docSnapshot.data() });
+    });
+    return list.sort((a, b) => {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
+    });
+  } catch (err) {
+    console.error("Failed to fetch from Firestore:", err);
+    return [];
+  }
+}
+
+// Helper to save submission to Firestore
+async function saveFirestoreSubmission(sub: any): Promise<void> {
+  if (!db) return;
+  try {
+    await setDoc(doc(db, "submissions", sub.id), sub);
+  } catch (err) {
+    console.error(`Failed to save to Firestore (${sub.id}):`, err);
+  }
+}
+
+// Helper to delete submission from Firestore
+async function deleteFirestoreSubmission(id: string): Promise<void> {
+  if (!db) return;
+  try {
+    await deleteDoc(doc(db, "submissions", id));
+  } catch (err) {
+    console.error(`Failed to delete from Firestore (${id}):`, err);
+  }
+}
+
+// Helper to update status in Firestore
+async function updateFirestoreSubmissionStatus(id: string, status: string): Promise<void> {
+  if (!db) return;
+  try {
+    const docRef = doc(db, "submissions", id);
+    await setDoc(docRef, { status }, { merge: true });
+  } catch (err) {
+    console.error(`Failed to update status in Firestore (${id}):`, err);
+  }
 }
 
 async function startServer() {
@@ -151,16 +220,29 @@ FutureCore.KG — это некоммерческая инициатива по 
     }
   });
 
-  app.get("/api/applications", (req, res) => {
+  app.get("/api/applications", async (req, res) => {
+    if (db) {
+      const subs = await getFirestoreSubmissions();
+      saveSubmissions(subs);
+      return res.json(subs);
+    }
     const subs = loadSubmissions();
     res.json(subs);
   });
 
-  app.post("/api/applications", (req, res) => {
+  app.post("/api/applications", async (req, res) => {
     const newSub = req.body;
     if (!newSub || !newSub.id) {
       return res.status(400).json({ error: "Invalid submission data" });
     }
+    
+    if (db) {
+      await saveFirestoreSubmission(newSub);
+      const subs = await getFirestoreSubmissions();
+      saveSubmissions(subs);
+      return res.status(201).json({ success: true, count: subs.length });
+    }
+
     const subs = loadSubmissions();
     // Prevent duplicates
     const filtered = subs.filter((s: any) => s.id !== newSub.id);
@@ -169,17 +251,33 @@ FutureCore.KG — это некоммерческая инициатива по 
     res.status(201).json({ success: true, count: filtered.length });
   });
 
-  app.delete("/api/applications/:id", (req, res) => {
+  app.delete("/api/applications/:id", async (req, res) => {
     const { id } = req.params;
+    
+    if (db) {
+      await deleteFirestoreSubmission(id);
+      const subs = await getFirestoreSubmissions();
+      saveSubmissions(subs);
+      return res.json({ success: true, count: subs.length });
+    }
+
     const subs = loadSubmissions();
     const filtered = subs.filter((s: any) => s.id !== id);
     saveSubmissions(filtered);
     res.json({ success: true, count: filtered.length });
   });
 
-  app.patch("/api/applications/:id/status", (req, res) => {
+  app.patch("/api/applications/:id/status", async (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
+    
+    if (db) {
+      await updateFirestoreSubmissionStatus(id, status);
+      const subs = await getFirestoreSubmissions();
+      saveSubmissions(subs);
+      return res.json({ success: true });
+    }
+
     const subs = loadSubmissions();
     const updated = subs.map((s: any) => {
       if (s.id === id) {

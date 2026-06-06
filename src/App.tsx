@@ -13,20 +13,7 @@ export default function App() {
   const [activeOpportunity, setActiveOpportunity] = useState<Opportunity | null>(null);
   const [applicationType, setApplicationType] = useState<"student" | "volunteer">("student");
 
-  const [isMobile, setIsMobile] = useState(() => {
-    if (typeof window !== "undefined") {
-      return window.innerWidth < 768;
-    }
-    return true;
-  });
 
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
 
   // Authentication configuration for Curator panel
   const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => {
@@ -134,11 +121,6 @@ export default function App() {
       <nav 
         id="bottom-nav"
         className="fixed bottom-0 left-0 w-full z-50 bg-white/95 backdrop-blur-md border-t border-slate-200/60 shadow-[0_-6px_20px_rgba(15,23,42,0.06)] h-16 rounded-t-2xl flex justify-around items-center px-2 pb-safe md:max-w-md md:left-1/2 md:-translate-x-1/2 md:bottom-4 md:rounded-2xl md:border"
-        style={{
-          transform: isMobile ? "translate3d(0, 0, 0)" : "translate3d(-50%, 0, 0)",
-          willChange: "transform",
-          backfaceVisibility: "hidden"
-        }}
       >
         {/* Navigation Tab: Home */}
         <button

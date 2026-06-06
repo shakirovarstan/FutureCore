@@ -82,19 +82,16 @@ export function ApplicationsView({
           const serverApps: Application[] = await res.json();
           // Fetch freshest local ones (for newly saved drafts/actions)
           const currentLocal = getLocalApps();
-          const drafts = currentLocal.filter((app) => app.status === "draft");
           
-          // Merge drafts with live server submissions (which preserves latest status like "approved")
-          const merged = [...drafts];
+          // Merge local applications (drafts + submitted) with live server submissions
+          const merged = [...currentLocal];
           serverApps.forEach((serverApp) => {
-            if (!merged.find((m) => m.id === serverApp.id)) {
+            const idx = merged.findIndex((m) => m.id === serverApp.id);
+            if (idx === -1) {
               merged.push(serverApp);
             } else {
               // Update status of matching local storage elements with the live server status
-              const idx = merged.findIndex((m) => m.id === serverApp.id);
-              if (idx !== -1) {
-                merged[idx] = { ...merged[idx], status: serverApp.status };
-              }
+              merged[idx] = { ...merged[idx], status: serverApp.status };
             }
           });
           

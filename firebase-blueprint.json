@@ -1,0 +1,83 @@
+{
+  "entities": {
+    "submissions": {
+      "title": "Submissions",
+      "description": "Educational student and volunteer applications for FutureCore",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the application"
+        },
+        "projectId": {
+          "type": "string",
+          "description": "ID of the associated opportunity/class"
+        },
+        "projectName": {
+          "type": "string",
+          "description": "Name of the target class or volunteering role"
+        },
+        "projectImage": {
+          "type": "string",
+          "description": "Image link for visual showcase"
+        },
+        "fullName": {
+          "type": "string",
+          "description": "FIO of the parent or volunteer practitioner"
+        },
+        "email": {
+          "type": "string",
+          "description": "Optional email contact info"
+        },
+        "phone": {
+          "type": "string",
+          "description": "Primary voice or WhatsApp contact link"
+        },
+        "motivation": {
+          "type": "string",
+          "description": "Personal notes, goals, or social background details"
+        },
+        "availability": {
+          "type": "array",
+          "description": "Weekday or weekend availability slots list"
+        },
+        "documents": {
+          "type": "array",
+          "description": "Uploaded credential details or document items list"
+        },
+        "googleFormsUrl": {
+          "type": "string",
+          "description": "Optional fallback doc link for forms integration"
+        },
+        "volunteerAge": {
+          "type": "string",
+          "description": "Age bracket for activists above 14 years old"
+        },
+        "childInfo": {
+          "type": "string",
+          "description": "Name and age details of the registered child"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["draft", "submitted", "approved", "pending", "rejected"],
+          "description": "Operational verification stage of application"
+        },
+        "step": {
+          "type": "integer",
+          "description": "Wizard progress page identifier"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Human-readable local creation date text"
+        }
+      },
+      "required": ["id", "fullName", "phone", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/submissions/{id}": {
+      "schema": "submissions",
+      "description": "Durable collection containing enrolled students and volunteer applications"
+    }
+  }
+}

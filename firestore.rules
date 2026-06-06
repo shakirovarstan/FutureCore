@@ -1,0 +1,14 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net default closed
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    // Submissions Security Rule Gate
+    match /submissions/{id} {
+      allow read, write: if true;
+    }
+  }
+}
