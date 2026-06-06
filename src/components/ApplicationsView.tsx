@@ -3,7 +3,8 @@ import { Opportunity, Application } from "../types";
 import { INITIAL_OPPORTUNITIES } from "../data";
 import { 
   ArrowLeft, ArrowRight, Save, CheckCircle, FileText, UploadCloud, 
-  Trash2, Link, ExternalLink, Calendar, HelpCircle, FileCheck, Check, Sparkles, FolderSync, Info, AlertCircle, X
+  Trash2, Link, ExternalLink, Calendar, HelpCircle, FileCheck, Check, Sparkles, FolderSync, Info, AlertCircle, X,
+  Mail, MessageSquare
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 
@@ -726,7 +727,6 @@ export function ApplicationsView({
                 Спасибо за вашу бесценную заявку в <strong>FutureCore.KG</strong> по направлению <strong className="text-slate-800 font-display">{activeOpportunity.title}</strong>. Данные сохранены в реестре.
               </p>
             </div>
-
             <div className="p-4 bg-slate-50 rounded-2xl border border-slate-100 text-left font-sans text-xs space-y-2">
               <div className="flex gap-1.5 items-center text-sky-600 font-display font-black text-4xs tracking-wider uppercase">
                 <CheckCircle className="w-4 h-4" />
@@ -753,7 +753,7 @@ export function ApplicationsView({
                 setAvailability([]);
                 setUploadedFiles([]);
               }}
-              className="w-full bg-sky-500 hover:bg-sky-600 text-white text-xs font-display font-bold py-3 px-4 rounded-xl transition-all cursor-pointer shadow-xs active:scale-98"
+              className="w-full bg-sky-500 hover:bg-sky-600 text-white text-xs font-display font-bold py-3 px-4 rounded-xl transition-all cursor-pointer shadow-xs active:scale-98 animate-pulse hover:animate-none"
             >
               Отлично, перейти в кабинет!
             </button>

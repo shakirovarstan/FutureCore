@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Application } from "../types";
 import { 
-  ShieldAlert, RefreshCw, Trash2, Calendar, Phone, Mail, 
+  ShieldAlert, RefreshCw, Trash2, Calendar, Phone, Mail, MessageSquare,
   GraduationCap, Check, HelpCircle, FileText, CheckCircle, Search, Filter, Sparkles, UserCheck, Lock, X, AlertCircle
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -17,6 +17,7 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"all" | "student" | "volunteer">("all");
   const [errorMess, setErrorMess] = useState<string | null>(null);
+  const [tgConfig, setTgConfig] = useState<{ isConfigured: boolean; chatId: string | null } | null>(null);
 
   // Customized, iframe-safe interactive states and notifications
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -26,6 +27,18 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
   const [showErrorToast, setShowErrorToast] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<{ id: string; name: string; type: string; size: string } | null>(null);
+
+  const fetchTgConfig = async () => {
+    try {
+      const res = await fetch("/api/telegram-config");
+      if (res.ok) {
+        const data = await res.json();
+        setTgConfig(data);
+      }
+    } catch (e) {
+      console.error("Error loading Telegram Bot config:", e);
+    }
+  };
 
   const fetchSubmissions = async (silent = false) => {
     if (!silent) setIsLoading(true);
@@ -51,6 +64,7 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
 
   useEffect(() => {
     fetchSubmissions(false);
+    fetchTgConfig();
     
     // Instant real-time background polling (runs silently every 1.5 seconds)
     const interval = setInterval(() => {
@@ -186,6 +200,68 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
         </div>
       </div>
 
+      {/* Telegram Agent Integration Panel */}
+      {tgConfig && (
+        <div className={`p-5 rounded-3xl border text-slate-800 transition-all ${
+          tgConfig.isConfigured 
+            ? "bg-emerald-50/50 border-emerald-250" 
+            : "bg-amber-50/40 border-amber-250"
+        }`}>
+          <div className="flex flex-col md:flex-row gap-4 items-start justify-between">
+            <div className="space-y-2 max-w-2xl text-left">
+              <div className="flex items-center gap-2">
+                <span className={`w-2 h-2 rounded-full ${tgConfig.isConfigured ? "bg-emerald-500 animate-pulse" : "bg-amber-400 animate-pulse"}`} />
+                <h3 className="font-display font-black text-xs sm:text-sm text-slate-800 uppercase tracking-tight">
+                  {tgConfig.isConfigured 
+                    ? "🤖 Мгновенные уведомления в Telegram активны" 
+                    : "🔔 Настройка автоматических уведомлений в Telegram"
+                  }
+                </h3>
+              </div>
+              
+              {tgConfig.isConfigured ? (
+                <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                  Отлично! Ваш Telegram бот успешно настроен и подключен к чату (<strong>{tgConfig.chatId}</strong>). Каждая новая анкета ученика или волонтера моментально доставляется прямо вам в Telegram-чат в ту же секунду! Проверки "кураторами вручную" больше не требуются.
+                </p>
+              ) : (
+                <div className="space-y-2 text-xs text-slate-600 leading-relaxed font-sans">
+                  <p>
+                    Вы можете получать каждую поданную анкету моментально в свой <b>Telegram</b> в режиме реального времени! Для этого нужно выполнить 3 быстрых шага:
+                  </p>
+                  <ol className="list-decimal pl-4 space-y-1.5 text-[11px] font-sans text-slate-550 text-left">
+                    <li>Откройте Telegram, найдите официального бота <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-sky-600 font-bold hover:underline">@BotFather</a>, отправьте команду <code>/newbot</code> и скопируйте выданный <b>API Token</b>.</li>
+                    <li>Добавьте вашего нового бота в удобный чат или напишите ему лично (нажмите кнопку Запустить / Start), а затем узнайте свой <b>Chat ID</b> с помощью бота <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="text-sky-600 font-bold hover:underline">@userinfobot</a>.</li>
+                    <li>Откройте настройки (символ шестеренки в верхнем правом меню AI Studio) и внесите <b>два значения</b> в Секреты (Secrets / Environment Variables):
+                      <div className="mt-1.5 font-mono text-[10px] bg-slate-100 p-2 rounded-xl text-slate-700 max-w-max border border-slate-150">
+                        <div className="font-black">TELEGRAM_BOT_TOKEN = <span className="text-rose-600">"ваш_токен"</span></div>
+                        <div className="font-black">TELEGRAM_CHAT_ID = <span className="text-sky-600">"ваш_чат_id"</span></div>
+                      </div>
+                    </li>
+                  </ol>
+                  <p className="text-[10px] text-amber-700 font-bold">
+                    ⚠️ После добавления секретов в AI Studio, обязательно нажмите кнопку "Restart Server" ("Перезапустить Dev-сервер") в панели управления, чтобы бот активировался!
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className={`p-4 rounded-2xl text-center self-stretch flex flex-col justify-center items-center shrink-0 border min-w-[140px] ${
+              tgConfig.isConfigured 
+                ? "bg-emerald-100/30 border-emerald-300/40 text-emerald-850" 
+                : "bg-amber-100/30 border-amber-300/40 text-amber-850"
+            }`}>
+              <span className="text-[9px] uppercase font-sans font-black tracking-wider leading-none text-slate-400">Статус</span>
+              <span className={`text-[11px] font-display font-black tracking-wider leading-normal mt-1 rounded-md px-2 py-0.5 ${
+                tgConfig.isConfigured ? "bg-emerald-500 text-white" : "bg-amber-500 text-white"
+              }`}>
+                {tgConfig.isConfigured ? "РАБОТАЕТ" : "БЕЗ БОТА"}
+              </span>
+              <span className="text-[9px] uppercase text-slate-400 font-bold mt-1">Telegram API</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Search and Filters bar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/60 shadow-xs flex flex-col md:flex-row gap-3">
         <div className="relative flex-1">
@@ -280,15 +356,46 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
                       <div className="space-y-2">
                         <p className="text-xs font-sans text-slate-400 uppercase tracking-wider font-extrabold">Заявитель</p>
                         <p className="font-display font-black text-sm text-slate-800 leading-tight">{sub.fullName}</p>
-                        <div className="flex flex-col gap-1 pt-1">
-                          <a href={`tel:${sub.phone}`} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-sky-505 font-medium">
-                            <Phone className="w-3.5 h-3.5 text-slate-400" />
-                            <span>{sub.phone}</span>
-                          </a>
-                          <a href={`mailto:${sub.email}`} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-sky-505 font-medium truncate">
-                            <Mail className="w-3.5 h-3.5 text-slate-400" />
-                            <span className="truncate">{sub.email}</span>
-                          </a>
+                        <div className="flex flex-col gap-1.5 pt-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <a href={`tel:${sub.phone}`} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-sky-500 font-medium">
+                              <Phone className="w-3.5 h-3.5 text-slate-400" />
+                              <span>{sub.phone}</span>
+                            </a>
+                            <a
+                              href={`https://wa.me/${sub.phone.replace(/[^0-9]/g, "")}?text=${encodeURIComponent(
+                                `Здравствуйте, ${sub.fullName}! Я куратор образовательного портала FutureCore.KG. Мы получили вашу заявку на направление "${sub.projectName}". Хочу обсудить с вами расписание и подробности нашего бесплатного обучения.`
+                              )}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 p-1 px-1.5 rounded-lg text-[10px] font-sans font-bold flex items-center gap-1 transition-all border border-emerald-150/50 hover:scale-[1.02]"
+                              title="Написать куратором в WhatsApp"
+                            >
+                              <MessageSquare className="w-2.5 h-2.5" />
+                              <span>WhatsApp</span>
+                            </a>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <a href={`mailto:${sub.email}`} className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-sky-500 font-medium truncate max-w-[200px]">
+                              <Mail className="w-3.5 h-3.5 text-slate-400" />
+                              <span className="truncate">{sub.email || "Нет почты"}</span>
+                            </a>
+                            {sub.email && (
+                              <a
+                                href={`mailto:${sub.email}?subject=${encodeURIComponent(
+                                  `[FUTURECORE.KG] Ваша заявка принята!`
+                                )}&body=${encodeURIComponent(
+                                  `Здравствуйте, ${sub.fullName}!\n\nСпасибо за вашу заявку на направление "${sub.projectName}" в образовательную инициативу FutureCore.KG.\n\nМы рады вашему отклику и готовы принять вас! В ближайшее время мы также продублируем связь по телефону ${sub.phone}.\n\nС уважением, куратор FutureCore.KG.`
+                                )}`}
+                                className="bg-sky-50 text-sky-600 hover:bg-sky-100 p-1 px-1.5 rounded-lg text-[10px] font-sans font-bold flex items-center gap-1 transition-all border border-sky-150/50 hover:scale-[1.02]"
+                                title="Написать письмо"
+                              >
+                                <Mail className="w-2.5 h-2.5" />
+                                <span>Email</span>
+                              </a>
+                            )}
+                          </div>
                         </div>
                       </div>
 

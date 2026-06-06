@@ -1,3 +1,4 @@
+import "dotenv/config";
 import express from "express";
 import path from "path";
 import fs from "fs";
@@ -25,6 +26,17 @@ function getGeminiClient(): GoogleGenAI | null {
   return aiClient;
 }
 
+// Helper to write robust diagnostics to a local diagnostics log
+function logDiagnostic(message: string) {
+  try {
+    const logPath = path.join(process.cwd(), "diagnostics.log");
+    const timestamp = new Date().toISOString();
+    fs.appendFileSync(logPath, `[${timestamp}] ${message}\n`, "utf-8");
+  } catch (e) {
+    console.error("Failed to write diagnostic:", e);
+  }
+}
+
 // Read firebase-applet-config.json safely for Firestore initialization
 let db: any = null;
 try {
@@ -36,12 +48,12 @@ try {
     db = initializeFirestore(firebaseApp, {
       experimentalForceLongPolling: true,
     }, config.firestoreDatabaseId);
-    console.log("Firebase Firestore initialized successfully with HTTP long-polling on backend.");
+    logDiagnostic("Firebase Firestore initialized successfully with HTTP long-polling on backend.");
   } else {
-    console.warn("firebase-applet-config.json not found, falling back to local storage file.");
+    logDiagnostic("firebase-applet-config.json not found, falling back to local storage file.");
   }
-} catch (e) {
-  console.error("Error initializing Firebase:", e);
+} catch (e: any) {
+  logDiagnostic(`Error initializing Firebase: ${e.message || String(e)}`);
 }
 
 // Robust custom date parsing helper resolving local formats e.g. "DD.MM.YYYY" or ISO
@@ -65,41 +77,73 @@ function parseDateString(dateStr: string): number {
 
 // Helper to fetch submissions from Firestore returning null on failure to safeguard fallback
 async function getFirestoreSubmissions(): Promise<any[] | null> {
-  if (!db) return null;
+  if (!db) {
+    logDiagnostic("getFirestoreSubmissions - db is not initialized.");
+    return null;
+  }
   try {
     const querySnapshot = await getDocs(collection(db, "submissions"));
     const list: any[] = [];
     querySnapshot.forEach((docSnapshot) => {
       list.push({ ...docSnapshot.data() });
     });
-    return list.sort((a, b) => {
+    const sorted = list.sort((a, b) => {
       const dateA = a.createdAt ? parseDateString(a.createdAt) : 0;
       const dateB = b.createdAt ? parseDateString(b.createdAt) : 0;
       return dateB - dateA;
     });
-  } catch (err) {
-    console.error("Failed to fetch from Firestore:", err);
+    logDiagnostic(`getFirestoreSubmissions - successfully fetched ${list.length} submissions.`);
+    return sorted;
+  } catch (err: any) {
+    logDiagnostic(`Failed to fetch from Firestore: ${err.message || String(err)} -- Stack: ${err.stack || ""}`);
     return null;
   }
 }
 
 // Helper to save submission to Firestore
 async function saveFirestoreSubmission(sub: any): Promise<void> {
-  if (!db) return;
-  await setDoc(doc(db, "submissions", sub.id), sub);
+  if (!db) {
+    logDiagnostic("saveFirestoreSubmission - db is not initialized.");
+    return;
+  }
+  try {
+    await setDoc(doc(db, "submissions", sub.id), sub);
+    logDiagnostic(`saveFirestoreSubmission - successfully saved ${sub.id} to Firestore.`);
+  } catch (err: any) {
+    logDiagnostic(`Failed to save ${sub.id} to Firestore: ${err.message || String(err)}`);
+    throw err;
+  }
 }
 
 // Helper to delete submission from Firestore
 async function deleteFirestoreSubmission(id: string): Promise<void> {
-  if (!db) return;
-  await deleteDoc(doc(db, "submissions", id));
+  if (!db) {
+    logDiagnostic("deleteFirestoreSubmission - db is not initialized.");
+    return;
+  }
+  try {
+    await deleteDoc(doc(db, "submissions", id));
+    logDiagnostic(`deleteFirestoreSubmission - successfully deleted ${id} from Firestore.`);
+  } catch (err: any) {
+    logDiagnostic(`Failed to delete ${id} from Firestore: ${err.message || String(err)}`);
+    throw err;
+  }
 }
 
 // Helper to update status in Firestore
 async function updateFirestoreSubmissionStatus(id: string, status: string): Promise<void> {
-  if (!db) return;
-  const docRef = doc(db, "submissions", id);
-  await setDoc(docRef, { status }, { merge: true });
+  if (!db) {
+    logDiagnostic("updateFirestoreSubmissionStatus - db is not initialized.");
+    return;
+  }
+  try {
+    const docRef = doc(db, "submissions", id);
+    await setDoc(docRef, { status }, { merge: true });
+    logDiagnostic(`updateFirestoreSubmissionStatus - successfully updated status of ${id} to ${status} in Firestore.`);
+  } catch (err: any) {
+    logDiagnostic(`Failed to update status of ${id} in Firestore: ${err.message || String(err)}`);
+    throw err;
+  }
 }
 
 async function startServer() {
@@ -246,6 +290,16 @@ FutureCore.KG — это некоммерческая инициатива по 
     }
   });
 
+  // Status endpoint for Telegram bot configuration
+  app.get("/api/telegram-config", (req, res) => {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+    res.json({
+      isConfigured: !!(token && chatId),
+      chatId: chatId ? chatId.replace(/.(?=.{4})/g, "*") : null
+    });
+  });
+
   app.post("/api/applications", async (req, res) => {
     const newSub = req.body;
     if (!newSub || !newSub.id) {
@@ -262,10 +316,77 @@ FutureCore.KG — это некоммерческая инициатива по 
     if (db) {
       try {
         await saveFirestoreSubmission(newSub);
-        console.log(`Successfully persisted submission ${newSub.id} to Firestore.`);
-      } catch (err) {
-        console.error(`Error persisting ${newSub.id} directly to Firestore:`, err);
+        logDiagnostic(`Successfully persisted submission ${newSub.id} to Firestore.`);
+      } catch (err: any) {
+        logDiagnostic(`Error persisting ${newSub.id} directly to Firestore: ${err.message || String(err)}`);
       }
+    }
+
+    // 3. Automatically dispatch Telegram Bot notification if configured
+    const tgToken = process.env.TELEGRAM_BOT_TOKEN;
+    const tgChatId = process.env.TELEGRAM_CHAT_ID;
+    if (tgToken && tgChatId) {
+      try {
+        const typeLabel = newSub.type === "volunteer" || newSub.id.startsWith("app-vol-")
+          ? "🌟 Заявка ВОЛОНТЕРА (14+ лет)" 
+          : "👶 Заявка на бесплатное ОБУЧЕНИЕ";
+          
+        const availabilityText = Array.isArray(newSub.availability) && newSub.availability.length > 0
+          ? newSub.availability.join(", ") 
+          : "Индивидуальный график";
+
+        // Clean motivation text (strip HTML/XML if any)
+        const cleanMotivation = (newSub.motivation || "Не заполнено")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+
+        const filesText = Array.isArray(newSub.documents) && newSub.documents.length > 0
+          ? newSub.documents.map((d: any) => `• 📄 <b>${d.name || "Документ"}</b> (${Math.round((d.size || 0) / 1024)} KB)`).join("\n")
+          : "Нет прикрепленных документов";
+
+        const tgMessage = 
+`<b>=== FUTURECORE.KG ===</b>\n` +
+`🔔 <b>ПОЛУЧЕНА НОВАЯ АНКЕТА!</b>\n\n` +
+`👤 <b>ФИО:</b> ${newSub.fullName || "—"}\n` +
+`🏷 <b>Тип:</b> ${typeLabel}\n` +
+`📞 <b>Телефон:</b> <code>${newSub.phone || "—"}</code>\n` +
+`📧 <b>Email:</b> <code>${newSub.email || "—"}</code>\n` +
+`📚 <b>Выбранное направление:</b> <i>${newSub.projectName || "—"}</i>\n` +
+`${newSub.volunteerAge ? `👶 <b>Возраст волонтера:</b> ${newSub.volunteerAge} лет` : ""}` +
+`${newSub.childInfo ? `👶 <b>Ребенок (ФИО, возраст):</b> ${newSub.childInfo}` : ""}\n\n` +
+`📋 <b>О себе / Сообщение:</b>\n<i>${cleanMotivation}</i>\n\n` +
+`🗓 <b>Удобный график:</b> ${availabilityText}\n\n` +
+`📂 <b>Файлы:</b>\n${filesText}\n\n` +
+`🕒 <b>Дата подачи:</b> ${newSub.createdAt || new Date().toLocaleString()}`;
+
+        const tgUrl = `https://api.telegram.org/bot${tgToken}/sendMessage`;
+        
+        // Execute fetch in the background to not freeze user response
+        fetch(tgUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: tgChatId,
+            text: tgMessage,
+            parse_mode: "HTML"
+          })
+        }).then(async (tgRes) => {
+          if (!tgRes.ok) {
+            const errBody = await tgRes.text();
+            logDiagnostic(`Telegram API error status ${tgRes.status}: ${errBody}`);
+          } else {
+            logDiagnostic(`Telegram notification successfully delivered for application ${newSub.id}`);
+          }
+        }).catch((err) => {
+          logDiagnostic(`Network error while dispatching Telegram report: ${err.message}`);
+        });
+
+      } catch (tgErr: any) {
+        logDiagnostic(`Failed to compile Telegram notification: ${tgErr.message || String(tgErr)}`);
+      }
+    } else {
+      logDiagnostic("Telegram bot not configured (TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing in environment).");
     }
 
     res.status(201).json({ success: true, count: filtered.length });
