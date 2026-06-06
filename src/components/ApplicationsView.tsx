@@ -442,7 +442,7 @@ export function ApplicationsView({
                   : activeOpportunity.title
                 }
               </h3>
-              <p className="text-4xs text-slate-500 font-sans mt-0.5">Локация: {activeOpportunity.location} • {activeOpportunity.commitment}</p>
+              <p className="text-4xs text-slate-500 font-sans mt-0.5">Нагрузка: {activeOpportunity.commitment}</p>
             </div>
           </div>
         )}

@@ -302,6 +302,8 @@ FutureCore.KG — это некоммерческая инициатива по 
 
   app.post("/api/applications", async (req, res) => {
     const newSub = req.body;
+    logDiagnostic(`[POST /api/applications] Incoming request. Body ID: ${newSub?.id}. Bot Token: ${process.env.TELEGRAM_BOT_TOKEN ? "Loaded (Len: " + process.env.TELEGRAM_BOT_TOKEN.length + ")" : "MISSING"}, Chat ID: ${process.env.TELEGRAM_CHAT_ID ? process.env.TELEGRAM_CHAT_ID : "MISSING"}`);
+
     if (!newSub || !newSub.id) {
       return res.status(400).json({ error: "Invalid submission data" });
     }

@@ -28,7 +28,6 @@ export function HomeView({ onApply }: HomeViewProps) {
       const matchesSearch =
         opp.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
         opp.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        opp.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
         opp.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase()));
 
       const matchesCategory = selectedCategory === "all" || opp.category === selectedCategory;
@@ -268,10 +267,7 @@ export function HomeView({ onApply }: HomeViewProps) {
                       <h3 className="font-display font-black text-slate-800 text-base leading-snug">
                         {displayTitle}
                       </h3>
-                      <div className="flex items-center gap-1.5 text-slate-500 text-xs font-semibold">
-                        <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        <span>{opp.location}</span>
-                      </div>
+
                       <p className="font-sans text-xs text-slate-500 leading-relaxed line-clamp-3">
                         {displayDescription}
                       </p>

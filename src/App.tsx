@@ -13,7 +13,10 @@ export default function App() {
   const [activeOpportunity, setActiveOpportunity] = useState<Opportunity | null>(null);
   const [applicationType, setApplicationType] = useState<"student" | "volunteer">("student");
 
-
+  // Scroll to top window on navigation between views
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "instant" });
+  }, [activeTab, activeOpportunity]);
 
   // Authentication configuration for Curator panel
   const [isAdminUnlocked, setIsAdminUnlocked] = useState<boolean>(() => {
