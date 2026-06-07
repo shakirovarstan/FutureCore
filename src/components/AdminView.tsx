@@ -21,6 +21,8 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
     isConfigured: false,
     chatId: null
   });
+  const [isTestingTg, setIsTestingTg] = useState(false);
+  const [tgTestResult, setTgTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Customized, iframe-safe interactive states and notifications
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -40,6 +42,29 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
       }
     } catch (e) {
       console.error("Error loading Telegram Bot config:", e);
+    }
+  };
+
+  const handleTestTg = async () => {
+    setIsTestingTg(true);
+    setTgTestResult(null);
+    try {
+      const res = await fetch("/api/telegram-test", { method: "POST" });
+      const data = await res.json();
+      setTgTestResult({
+        success: data.success,
+        message: data.success ? data.message : data.error
+      });
+      if (data.success) {
+        setTimeout(() => setTgTestResult(null), 5000);
+      }
+    } catch (e: any) {
+      setTgTestResult({
+        success: false,
+        message: "Ошибка при запросе к серверу."
+      });
+    } finally {
+      setIsTestingTg(false);
     }
   };
 
@@ -170,6 +195,11 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
           <p className="text-xs text-slate-300 font-sans leading-relaxed">
             Здесь отображаются реальные заявки от учеников и волонтеров, отправленные на ваш сайт.
           </p>
+          {!tgConfig.isConfigured && (
+            <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/30 rounded-lg text-[10px] text-amber-200 font-sans">
+              <strong>Внимание:</strong> Чтобы бот работал на Vercel или другом хостинге, вы ДОЛЖНЫ добавить <code>TELEGRAM_BOT_TOKEN</code> и <code>TELEGRAM_CHAT_ID</code> в настройки окружения (Environment Variables) вашего проекта на Vercel.
+            </div>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <button
@@ -234,27 +264,53 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
               </div>
               
               {tgConfig.isConfigured ? (
-                <p className="text-xs text-slate-600 leading-relaxed font-sans">
-                  Отлично! Ваш Telegram бот успешно настроен и подключен к чату (<strong>{tgConfig.chatId}</strong>). Каждая новая анкета ученика или волонтера моментально доставляется прямо вам в Telegram-чат в ту же секунду! Проверки "кураторами вручную" больше не требуются.
-                </p>
+                <div className="space-y-3">
+                  <p className="text-xs text-slate-600 leading-relaxed font-sans">
+                    Отлично! Ваш Telegram бот успешно настроен и подключен к чату (<strong>{tgConfig.chatId}</strong>). Каждая новая анкета ученика или волонтера моментально доставляется прямо вам в Telegram-чат в ту же секунду!
+                  </p>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <button
+                      onClick={handleTestTg}
+                      disabled={isTestingTg}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold py-2 px-4 rounded-xl flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50"
+                    >
+                      {isTestingTg ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
+                      Проверить соединение
+                    </button>
+                    {tgTestResult && (
+                      <span className={`text-[10px] font-bold ${tgTestResult.success ? "text-emerald-700" : "text-rose-600"}`}>
+                        {tgTestResult.success ? "✅ Сообщение отправлено!" : `❌ ${tgTestResult.message}`}
+                      </span>
+                    )}
+                  </div>
+                </div>
               ) : (
-                <div className="space-y-2 text-xs text-slate-600 leading-relaxed font-sans">
+                <div className="space-y-3 text-xs text-slate-600 leading-relaxed font-sans">
                   <p>
                     Вы можете получать каждую поданную анкету моментально в свой <b>Telegram</b> в режиме реального времени! Для этого нужно выполнить 3 быстрых шага:
                   </p>
                   <ol className="list-decimal pl-4 space-y-1.5 text-[11px] font-sans text-slate-550 text-left">
                     <li>Откройте Telegram, найдите официального бота <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-sky-600 font-bold hover:underline">@BotFather</a>, отправьте команду <code>/newbot</code> и скопируйте выданный <b>API Token</b>.</li>
                     <li>Добавьте вашего нового бота в удобный чат или напишите ему лично (нажмите кнопку Запустить / Start), а затем узнайте свой <b>Chat ID</b> с помощью бота <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="text-sky-600 font-bold hover:underline">@userinfobot</a>.</li>
-                    <li>Откройте настройки (символ шестеренки в верхнем правом меню AI Studio) и внесите <b>два значения</b> в Секреты (Secrets / Environment Variables):
-                      <div className="mt-1.5 font-mono text-[10px] bg-slate-100 p-2 rounded-xl text-slate-700 max-w-max border border-slate-150">
+                    <li>Внесите эти значения в переменные окружения (Environment Variables) на <b>Vercel</b> или <b>AI Studio</b>:
+                      <div className="mt-1.5 font-mono text-[10px] bg-slate-100 p-2 rounded-xl text-slate-700 max-w-max border border-slate-150 relative">
                         <div className="font-black">TELEGRAM_BOT_TOKEN = <span className="text-rose-600">"ваш_токен"</span></div>
                         <div className="font-black">TELEGRAM_CHAT_ID = <span className="text-sky-600">"ваш_чат_id"</span></div>
                       </div>
                     </li>
                   </ol>
-                  <p className="text-[10px] text-amber-700 font-bold">
-                    ⚠️ После добавления секретов в AI Studio, обязательно нажмите кнопку "Restart Server" ("Перезапустить Dev-сервер") в панели управления, чтобы бот активировался!
-                  </p>
+                  <div className="p-2.5 bg-amber-100/50 border border-amber-200 rounded-xl space-y-1.5">
+                    <p className="text-[10px] text-amber-800 font-bold flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5" />
+                      ВАЖНО: ВЕБХУКИ НЕ НУЖНЫ!
+                    </p>
+                    <p className="text-[9px] text-amber-700 leading-tight font-medium">
+                      Этот сайт работает через прямые уведомления. Если вы ранее настраивали <b>Webhook</b> для своего бота, пожалуйста, очистите его (удалите), иначе сообщения могут приходить с задержкой или не приходить вовсе. Бот должен быть просто "живым" и запущенным.
+                    </p>
+                    <p className="text-[9px] text-amber-700 leading-tight">
+                      После добавления ключей на Vercel, обязательно сделайте <b>Redeploy</b> (Пересборку) проекта, чтобы новые ключи вступили в силу!
+                    </p>
+                  </div>
                 </div>
               )}
             </div>

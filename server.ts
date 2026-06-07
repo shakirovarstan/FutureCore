@@ -300,31 +300,77 @@ FutureCore.KG — это некоммерческая инициатива по 
     });
   });
 
+  // Test Telegram endpoint
+  app.post("/api/telegram-test", async (req, res) => {
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
+
+    if (!token || !chatId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Telegram API не настроен (отсутствуют токены в .env / секретах)." 
+      });
+    }
+
+    try {
+      const tgUrl = `https://api.telegram.org/bot${token}/sendMessage`;
+      const tgRes = await fetch(tgUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text: "🚀 <b>FUTURECORE.KG: Тестовое сообщение</b>\nЕсли вы получили это сообщение, значит ваш бот корректно настроен и готов к работе!",
+          parse_mode: "HTML"
+        })
+      });
+
+      const data: any = await tgRes.json();
+      
+      if (tgRes.ok) {
+        console.log(`[Telegram Test] Success: ${JSON.stringify(data)}`);
+        return res.json({ success: true, message: "Тестовое сообщение успешно отправлено!" });
+      } else {
+        console.error(`[Telegram Test] API Error: ${tgRes.status} ${JSON.stringify(data)}`);
+        return res.status(tgRes.status).json({ 
+          success: false, 
+          error: `Ошибка Telegram API (${tgRes.status}): ${data.description || "Неизвестная ошибка"}` 
+        });
+      }
+    } catch (err: any) {
+      console.error(`[Telegram Test] Network Error: ${err.message}`);
+      return res.status(500).json({ 
+        success: false, 
+        error: `Сетевая ошибка: ${err.message}` 
+      });
+    }
+  });
+
   app.post("/api/applications", async (req, res) => {
     const newSub = req.body;
-    logDiagnostic(`[POST /api/applications] Incoming request. Body ID: ${newSub?.id}. Bot Token: ${process.env.TELEGRAM_BOT_TOKEN ? "Loaded (Len: " + process.env.TELEGRAM_BOT_TOKEN.length + ")" : "MISSING"}, Chat ID: ${process.env.TELEGRAM_CHAT_ID ? process.env.TELEGRAM_CHAT_ID : "MISSING"}`);
+    const logInfo = `[POST /api/applications] ID: ${newSub?.id}. Bot Token: ${!!process.env.TELEGRAM_BOT_TOKEN}, Chat ID: ${process.env.TELEGRAM_CHAT_ID}`;
+    logDiagnostic(logInfo);
+    console.log(logInfo);
 
     if (!newSub || !newSub.id) {
       return res.status(400).json({ error: "Invalid submission data" });
     }
     
-    // 1. Immediately store in local file cache to guarantee high availability on current container Instance
+    // 1. Immediately store in local file cache
     const subs = loadSubmissions();
     const filtered = subs.filter((s: any) => s.id !== newSub.id);
     filtered.unshift(newSub);
     saveSubmissions(filtered);
 
-    // 2. Persist to central Firestore database synchronously so other devices can pull immediately
+    // 2. Persist to central Firestore database
     if (db) {
       try {
         await saveFirestoreSubmission(newSub);
-        logDiagnostic(`Successfully persisted submission ${newSub.id} to Firestore.`);
       } catch (err: any) {
-        logDiagnostic(`Error persisting ${newSub.id} directly to Firestore: ${err.message || String(err)}`);
+        console.error(`Firestore save error for ${newSub.id}:`, err);
       }
     }
 
-    // 3. Automatically dispatch Telegram Bot notification if configured
+    // 3. Automatically dispatch Telegram Bot notification
     const tgToken = process.env.TELEGRAM_BOT_TOKEN;
     const tgChatId = process.env.TELEGRAM_CHAT_ID;
     if (tgToken && tgChatId) {
@@ -337,7 +383,6 @@ FutureCore.KG — это некоммерческая инициатива по 
           ? newSub.availability.join(", ") 
           : "Индивидуальный график";
 
-        // Clean motivation text (strip HTML/XML if any)
         const cleanMotivation = (newSub.motivation || "Не заполнено")
           .replace(/&/g, "&amp;")
           .replace(/</g, "&lt;")
@@ -364,8 +409,7 @@ FutureCore.KG — это некоммерческая инициатива по 
 
         const tgUrl = `https://api.telegram.org/bot${tgToken}/sendMessage`;
         
-        // Execute fetch in the background to not freeze user response
-        fetch(tgUrl, {
+        const tgRes = await fetch(tgUrl, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -373,22 +417,26 @@ FutureCore.KG — это некоммерческая инициатива по 
             text: tgMessage,
             parse_mode: "HTML"
           })
-        }).then(async (tgRes) => {
-          if (!tgRes.ok) {
-            const errBody = await tgRes.text();
-            logDiagnostic(`Telegram API error status ${tgRes.status}: ${errBody}`);
-          } else {
-            logDiagnostic(`Telegram notification successfully delivered for application ${newSub.id}`);
-          }
-        }).catch((err) => {
-          logDiagnostic(`Network error while dispatching Telegram report: ${err.message}`);
         });
 
+        if (!tgRes.ok) {
+          const errBody = await tgRes.text();
+          const errMsg = `Telegram API error status ${tgRes.status} for application ${newSub.id}: ${errBody}`;
+          logDiagnostic(errMsg);
+          console.error(errMsg);
+        } else {
+          const okMsg = `Telegram notification successfully delivered for application ${newSub.id}`;
+          logDiagnostic(okMsg);
+          console.log(okMsg);
+        }
+
       } catch (tgErr: any) {
-        logDiagnostic(`Failed to compile Telegram notification: ${tgErr.message || String(tgErr)}`);
+        const fatalMsg = `Failed to dispatch Telegram notification for ${newSub.id}: ${tgErr.message || String(tgErr)}`;
+        logDiagnostic(fatalMsg);
+        console.error(fatalMsg);
       }
     } else {
-      logDiagnostic("Telegram bot not configured (TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID missing in environment).");
+      console.warn(`Telegram notification skipped for ${newSub.id}: Credentials missing. TOKEN: ${!!tgToken}, CHAT_ID: ${!!tgChatId}`);
     }
 
     res.status(201).json({ success: true, count: filtered.length });
