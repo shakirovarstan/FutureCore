@@ -28,12 +28,17 @@ function getGeminiClient(): GoogleGenAI | null {
 
 // Helper to write robust diagnostics to a local diagnostics log
 function logDiagnostic(message: string) {
+  const timestamp = new Date().toISOString();
+  console.log(`[Diagnostic] [${timestamp}] ${message}`);
+  
   try {
-    const logPath = path.join(process.cwd(), "diagnostics.log");
-    const timestamp = new Date().toISOString();
-    fs.appendFileSync(logPath, `[${timestamp}] ${message}\n`, "utf-8");
+    // Only attempt file logging if not in production (serverless safe)
+    if (process.env.NODE_ENV !== "production") {
+      const logPath = path.join(process.cwd(), "diagnostics.log");
+      fs.appendFileSync(logPath, `[${timestamp}] ${message}\n`, "utf-8");
+    }
   } catch (e) {
-    console.error("Failed to write diagnostic:", e);
+    // Silent fail for file logging in serverless
   }
 }
 
@@ -146,10 +151,13 @@ async function updateFirestoreSubmissionStatus(id: string, status: string): Prom
   }
 }
 
+const app = express();
+const PORT = 3000;
+
+// Export app for Vercel / serverless deployments
+export default app;
+
 async function startServer() {
-  const app = express();
-  const PORT = 3000;
-  
   app.use(express.json());
 
   const SUBMISSIONS_FILE = path.join(process.cwd(), "submissions.json");

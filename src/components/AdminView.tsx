@@ -310,6 +310,16 @@ export function AdminView({ onSelectTab, onLockAdmin }: AdminViewProps) {
                     <p className="text-[9px] text-amber-700 leading-tight">
                       После добавления ключей на Vercel, обязательно сделайте <b>Redeploy</b> (Пересборку) проекта, чтобы новые ключи вступили в силу!
                     </p>
+                    <div className="mt-2 p-2 bg-rose-50 border border-rose-200 rounded-lg space-y-1">
+                      <p className="text-[10px] text-rose-800 font-bold flex items-center gap-1.5">
+                        <AlertCircle className="w-3 h-3" />
+                        КАК УДАЛИТЬ WEBHOOK (ЕСЛИ ВЫ ЕГО СТАВИЛИ):
+                      </p>
+                      <p className="text-[9px] text-rose-700 leading-tight">
+                        Если вы ошибочно ставили Webhook через другие сервисы, бот может "молчать". Чтобы сбросить его, откройте в браузере ссылку:<br/>
+                        <code className="bg-white/50 px-1 select-all break-all">https://api.telegram.org/botВАШ_ТОКЕН/deleteWebhook</code>
+                      </p>
+                    </div>
                   </div>
                 </div>
               )}
