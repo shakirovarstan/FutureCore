@@ -2,7 +2,6 @@ import "dotenv/config";
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp } from "firebase/app";
 import { initializeFirestore, collection, doc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
@@ -42,23 +41,102 @@ function logDiagnostic(message: string) {
   }
 }
 
-// Read firebase-applet-config.json safely for Firestore initialization
+// Lazy Firestore init — avoids cold-start crashes on Vercel serverless
 let db: any = null;
-try {
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  if (fs.existsSync(configPath)) {
-    const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    const firebaseApp = initializeApp(config);
-    // Use initializeFirestore with experimentalForceLongPolling to prevent WebSocket/gRPC streams dropping in sandbox containers
-    db = initializeFirestore(firebaseApp, {
-      experimentalForceLongPolling: true,
-    }, config.firestoreDatabaseId);
-    logDiagnostic("Firebase Firestore initialized successfully with HTTP long-polling on backend.");
-  } else {
-    logDiagnostic("firebase-applet-config.json not found, falling back to local storage file.");
+let dbInitAttempted = false;
+
+function getDb() {
+  if (dbInitAttempted) return db;
+  dbInitAttempted = true;
+  try {
+    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+    if (fs.existsSync(configPath)) {
+      const config = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+      const firebaseApp = initializeApp(config);
+      db = initializeFirestore(firebaseApp, {
+        experimentalForceLongPolling: true,
+      }, config.firestoreDatabaseId);
+      logDiagnostic("Firebase Firestore initialized successfully with HTTP long-polling on backend.");
+    } else {
+      logDiagnostic("firebase-applet-config.json not found, falling back to local storage file.");
+    }
+  } catch (e: any) {
+    logDiagnostic(`Error initializing Firebase: ${e.message || String(e)}`);
   }
-} catch (e: any) {
-  logDiagnostic(`Error initializing Firebase: ${e.message || String(e)}`);
+  return db;
+}
+
+function getTelegramConfig() {
+  const token = process.env.TELEGRAM_BOT_TOKEN?.trim();
+  const chatId = process.env.TELEGRAM_CHAT_ID?.trim();
+  return {
+    token: token || null,
+    chatId: chatId || null,
+    isConfigured: !!(token && chatId),
+  };
+}
+
+function escapeHtml(text: string): string {
+  return String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+async function clearTelegramWebhook(token: string) {
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/deleteWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ drop_pending_updates: false }),
+    });
+  } catch (err: any) {
+    logDiagnostic(`Telegram deleteWebhook skipped: ${err.message || String(err)}`);
+  }
+}
+
+async function sendTelegramMessage(token: string, chatId: string, text: string) {
+  await clearTelegramWebhook(token);
+
+  const tgUrl = `https://api.telegram.org/bot${token}/sendMessage`;
+  const payload = {
+    chat_id: chatId,
+    text,
+    parse_mode: "HTML",
+    disable_web_page_preview: true,
+  };
+
+  const tgRes = await fetch(tgUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+
+  const data: any = await tgRes.json().catch(() => ({}));
+
+  if (tgRes.ok) {
+    return { ok: true as const, data };
+  }
+
+  // Retry without HTML parse mode if Telegram rejects formatting
+  if (data?.description?.includes("parse")) {
+    const plainRes = await fetch(tgUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: text.replace(/<[^>]+>/g, ""),
+        disable_web_page_preview: true,
+      }),
+    });
+    const plainData: any = await plainRes.json().catch(() => ({}));
+    if (plainRes.ok) {
+      return { ok: true as const, data: plainData };
+    }
+    return { ok: false as const, status: plainRes.status, error: plainData.description || "Unknown Telegram error" };
+  }
+
+  return { ok: false as const, status: tgRes.status, error: data.description || "Unknown Telegram error" };
 }
 
 // Robust custom date parsing helper resolving local formats e.g. "DD.MM.YYYY" or ISO
@@ -82,12 +160,13 @@ function parseDateString(dateStr: string): number {
 
 // Helper to fetch submissions from Firestore returning null on failure to safeguard fallback
 async function getFirestoreSubmissions(): Promise<any[] | null> {
-  if (!db) {
+  const firestore = getDb();
+  if (!firestore) {
     logDiagnostic("getFirestoreSubmissions - db is not initialized.");
     return null;
   }
   try {
-    const querySnapshot = await getDocs(collection(db, "submissions"));
+    const querySnapshot = await getDocs(collection(firestore, "submissions"));
     const list: any[] = [];
     querySnapshot.forEach((docSnapshot) => {
       list.push({ ...docSnapshot.data() });
@@ -107,12 +186,13 @@ async function getFirestoreSubmissions(): Promise<any[] | null> {
 
 // Helper to save submission to Firestore
 async function saveFirestoreSubmission(sub: any): Promise<void> {
-  if (!db) {
+  const firestore = getDb();
+  if (!firestore) {
     logDiagnostic("saveFirestoreSubmission - db is not initialized.");
     return;
   }
   try {
-    await setDoc(doc(db, "submissions", sub.id), sub);
+    await setDoc(doc(firestore, "submissions", sub.id), sub);
     logDiagnostic(`saveFirestoreSubmission - successfully saved ${sub.id} to Firestore.`);
   } catch (err: any) {
     logDiagnostic(`Failed to save ${sub.id} to Firestore: ${err.message || String(err)}`);
@@ -122,12 +202,13 @@ async function saveFirestoreSubmission(sub: any): Promise<void> {
 
 // Helper to delete submission from Firestore
 async function deleteFirestoreSubmission(id: string): Promise<void> {
-  if (!db) {
+  const firestore = getDb();
+  if (!firestore) {
     logDiagnostic("deleteFirestoreSubmission - db is not initialized.");
     return;
   }
   try {
-    await deleteDoc(doc(db, "submissions", id));
+    await deleteDoc(doc(firestore, "submissions", id));
     logDiagnostic(`deleteFirestoreSubmission - successfully deleted ${id} from Firestore.`);
   } catch (err: any) {
     logDiagnostic(`Failed to delete ${id} from Firestore: ${err.message || String(err)}`);
@@ -137,12 +218,13 @@ async function deleteFirestoreSubmission(id: string): Promise<void> {
 
 // Helper to update status in Firestore
 async function updateFirestoreSubmissionStatus(id: string, status: string): Promise<void> {
-  if (!db) {
+  const firestore = getDb();
+  if (!firestore) {
     logDiagnostic("updateFirestoreSubmissionStatus - db is not initialized.");
     return;
   }
   try {
-    const docRef = doc(db, "submissions", id);
+    const docRef = doc(firestore, "submissions", id);
     await setDoc(docRef, { status }, { merge: true });
     logDiagnostic(`updateFirestoreSubmissionStatus - successfully updated status of ${id} to ${status} in Firestore.`);
   } catch (err: any) {
@@ -283,7 +365,7 @@ FutureCore.KG — это некоммерческая инициатива по 
 
 app.get("/api/applications", async (req, res) => {
   let subs = null;
-  if (db) {
+  if (getDb()) {
     subs = await getFirestoreSubmissions();
   }
   
@@ -299,18 +381,16 @@ app.get("/api/applications", async (req, res) => {
 
 // Status endpoint for Telegram bot configuration
 app.get("/api/telegram-config", (req, res) => {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const { isConfigured, chatId } = getTelegramConfig();
   res.json({
-    isConfigured: !!(token && chatId),
+    isConfigured,
     chatId: chatId ? chatId.replace(/.(?=.{4})/g, "*") : null
   });
 });
 
 // Test Telegram endpoint
 app.post("/api/telegram-test", async (req, res) => {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+  const { token, chatId } = getTelegramConfig();
 
   if (!token || !chatId) {
     return res.status(400).json({ 
@@ -320,29 +400,22 @@ app.post("/api/telegram-test", async (req, res) => {
   }
 
   try {
-    const tgUrl = `https://api.telegram.org/bot${token}/sendMessage`;
-    const tgRes = await fetch(tgUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: "🚀 <b>FUTURECORE.KG: Тестовое сообщение</b>\nЕсли вы получили это сообщение, значит ваш бот корректно настроен и готов к работе!",
-        parse_mode: "HTML"
-      })
-    });
+    const result = await sendTelegramMessage(
+      token,
+      chatId,
+      "🚀 <b>FUTURECORE.KG: Тестовое сообщение</b>\nЕсли вы получили это сообщение, значит ваш бот корректно настроен и готов к работе!"
+    );
 
-    const data: any = await tgRes.json();
-    
-    if (tgRes.ok) {
-      console.log(`[Telegram Test] Success: ${JSON.stringify(data)}`);
+    if (result.ok) {
+      console.log(`[Telegram Test] Success: ${JSON.stringify(result.data)}`);
       return res.json({ success: true, message: "Тестовое сообщение успешно отправлено!" });
-    } else {
-      console.error(`[Telegram Test] API Error: ${tgRes.status} ${JSON.stringify(data)}`);
-      return res.status(tgRes.status).json({ 
-        success: false, 
-        error: `Ошибка Telegram API (${tgRes.status}): ${data.description || "Неизвестная ошибка"}` 
-      });
     }
+
+    console.error(`[Telegram Test] API Error: ${result.status} ${result.error}`);
+    return res.status(result.status || 400).json({ 
+      success: false, 
+      error: `Ошибка Telegram API (${result.status}): ${result.error}` 
+    });
   } catch (err: any) {
     console.error(`[Telegram Test] Network Error: ${err.message}`);
     return res.status(500).json({ 
@@ -371,7 +444,7 @@ app.post("/api/applications", async (req, res) => {
   }
 
   // 2. Persist to central Firestore database
-  if (db) {
+  if (getDb()) {
     try {
       await saveFirestoreSubmission(newSub);
     } catch (err: any) {
@@ -380,8 +453,7 @@ app.post("/api/applications", async (req, res) => {
   }
 
   // 3. Automatically dispatch Telegram Bot notification
-  const tgToken = process.env.TELEGRAM_BOT_TOKEN;
-  const tgChatId = process.env.TELEGRAM_CHAT_ID;
+  const { token: tgToken, chatId: tgChatId } = getTelegramConfig();
   if (tgToken && tgChatId) {
     try {
       const typeLabel = newSub.type === "volunteer" || newSub.id.startsWith("app-vol-")
@@ -389,48 +461,39 @@ app.post("/api/applications", async (req, res) => {
         : "👶 Заявка на бесплатное ОБУЧЕНИЕ";
         
       const availabilityText = Array.isArray(newSub.availability) && newSub.availability.length > 0
-        ? newSub.availability.join(", ") 
+        ? newSub.availability.map((item: string) => escapeHtml(item)).join(", ") 
         : "Индивидуальный график";
 
-      const cleanMotivation = (newSub.motivation || "Не заполнено")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
-
       const filesText = Array.isArray(newSub.documents) && newSub.documents.length > 0
-        ? newSub.documents.map((d: any) => `• 📄 <b>${d.name || "Документ"}</b> (${Math.round((d.size || 0) / 1024)} KB)`).join("\n")
+        ? newSub.documents.map((d: any) => `• 📄 <b>${escapeHtml(d.name || "Документ")}</b> (${Math.round((d.size || 0) / 1024)} KB)`).join("\n")
         : "Нет прикрепленных документов";
+
+      const volunteerLine = newSub.volunteerAge
+        ? `👶 <b>Возраст волонтера:</b> ${escapeHtml(String(newSub.volunteerAge))} лет\n`
+        : "";
+      const childLine = newSub.childInfo
+        ? `👶 <b>Ребенок (ФИО, возраст):</b> ${escapeHtml(newSub.childInfo)}\n`
+        : "";
 
       const tgMessage = 
 `<b>=== FUTURECORE.KG ===</b>\n` +
 `🔔 <b>ПОЛУЧЕНА НОВАЯ АНКЕТА!</b>\n\n` +
-`👤 <b>ФИО:</b> ${newSub.fullName || "—"}\n` +
+`👤 <b>ФИО:</b> ${escapeHtml(newSub.fullName || "—")}\n` +
 `🏷 <b>Тип:</b> ${typeLabel}\n` +
-`📞 <b>Телефон:</b> <code>${newSub.phone || "—"}</code>\n` +
-`📧 <b>Email:</b> <code>${newSub.email || "—"}</code>\n` +
-`📚 <b>Выбранное направление:</b> <i>${newSub.projectName || "—"}</i>\n` +
-`${newSub.volunteerAge ? `👶 <b>Возраст волонтера:</b> ${newSub.volunteerAge} лет` : ""}` +
-`${newSub.childInfo ? `👶 <b>Ребенок (ФИО, возраст):</b> ${newSub.childInfo}` : ""}\n\n` +
-`📋 <b>О себе / Сообщение:</b>\n<i>${cleanMotivation}</i>\n\n` +
+`📞 <b>Телефон:</b> <code>${escapeHtml(newSub.phone || "—")}</code>\n` +
+`📧 <b>Email:</b> <code>${escapeHtml(newSub.email || "—")}</code>\n` +
+`📚 <b>Выбранное направление:</b> <i>${escapeHtml(newSub.projectName || "—")}</i>\n` +
+volunteerLine +
+childLine +
+`\n📋 <b>О себе / Сообщение:</b>\n<i>${escapeHtml(newSub.motivation || "Не заполнено")}</i>\n\n` +
 `🗓 <b>Удобный график:</b> ${availabilityText}\n\n` +
 `📂 <b>Файлы:</b>\n${filesText}\n\n` +
-`🕒 <b>Дата подачи:</b> ${newSub.createdAt || new Date().toLocaleString()}`;
+`🕒 <b>Дата подачи:</b> ${escapeHtml(newSub.createdAt || new Date().toLocaleString())}`;
 
-      const tgUrl = `https://api.telegram.org/bot${tgToken}/sendMessage`;
-      
-      const tgRes = await fetch(tgUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: tgChatId,
-          text: tgMessage,
-          parse_mode: "HTML"
-        })
-      });
+      const result = await sendTelegramMessage(tgToken, tgChatId, tgMessage);
 
-      if (!tgRes.ok) {
-        const errBody = await tgRes.text();
-        const errMsg = `Telegram API error status ${tgRes.status} for application ${newSub.id}: ${errBody}`;
+      if (!result.ok) {
+        const errMsg = `Telegram API error status ${result.status} for application ${newSub.id}: ${result.error}`;
         logDiagnostic(errMsg);
         console.error(errMsg);
       } else {
@@ -462,7 +525,7 @@ app.delete("/api/applications/:id", async (req, res) => {
   }
 
   // 2. Firestore sync
-  if (db) {
+  if (getDb()) {
     try {
       await deleteFirestoreSubmission(id);
       console.log(`Successfully synced deleted doc ${id} from Firestore.`);
@@ -486,7 +549,7 @@ app.patch("/api/applications/:id/status", async (req, res) => {
   }
 
   // 2. Firestore sync
-  if (db) {
+  if (getDb()) {
     try {
       await updateFirestoreSubmissionStatus(id, status);
       console.log(`Successfully patched status of ${id} in Firestore.`);
@@ -500,10 +563,12 @@ app.patch("/api/applications/:id/status", async (req, res) => {
 
 // Diagnostic endpoint to check env vars visibility on Vercel
 app.get("/api/debug-env", (req, res) => {
+  const tg = getTelegramConfig();
   res.json({
     nodeEnv: process.env.NODE_ENV,
-    hasToken: !!process.env.TELEGRAM_BOT_TOKEN,
-    hasChatId: !!process.env.TELEGRAM_CHAT_ID,
+    isVercel: !!process.env.VERCEL,
+    hasToken: !!tg.token,
+    hasChatId: !!tg.chatId,
     hasGemini: !!process.env.GEMINI_API_KEY,
     currentTime: new Date().toISOString()
   });
@@ -525,20 +590,25 @@ if (process.env.NODE_ENV === "production") {
 // Export app here
 export default app;
 
-// Standalone start (non-production / dev)
+// Standalone start (local development only — never on Vercel/serverless)
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-    
-    app.listen(PORT, "0.0.0.0", () => {
-      console.log(`Development server running at http://localhost:${PORT}`);
-    });
+  if (process.env.VERCEL || process.env.NODE_ENV === "production") {
+    return;
   }
+
+  const { createServer: createViteServer } = await import("vite");
+  const vite = await createViteServer({
+    server: { middlewareMode: true },
+    appType: "spa",
+  });
+  app.use(vite.middlewares);
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Development server running at http://localhost:${PORT}`);
+  });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
 
